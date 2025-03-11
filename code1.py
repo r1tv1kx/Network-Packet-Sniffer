@@ -1,79 +1,71 @@
+import scapy.all as scapy
 import tkinter as tk
-from tkinter import messagebox, ttk
-import os
+from tkinter import ttk, messagebox
+import psutil
 
-# Suppress Tkinter deprecation warning on macOS
-os.environ["TK_SILENCE_DEPRECATION"] = "1"
+# Function to get user-friendly network interface names
+def get_network_interfaces():
+    interfaces = []
+    for interface, addrs in psutil.net_if_addrs().items():
+        if any(addr.family == 2 for addr in addrs):  # IPv4 check
+            if "Wi-Fi" in interface or "wlan" in interface.lower():
+                interfaces.append(("Wi-Fi", interface))
+            elif "Ethernet" in interface or "eth" in interface.lower():
+                interfaces.append(("Ethernet", interface))
+            else:
+                interfaces.append((interface, interface))
+    return interfaces
 
-# Caesar cipher logic
-letters = 'abcdefghijklmnopqrstuvwxyz'
+# Function to display packet information
+def packet_info(packet):
+    if packet.haslayer(scapy.IP):
+        src_ip = packet[scapy.IP].src
+        dst_ip = packet[scapy.IP].dst
+        protocol = packet[scapy.IP].proto
 
-def encrypt(text, key):
-    return ''.join(
-        letters[(letters.index(letter.lower()) + key) % 26] if letter.lower() in letters else letter for letter in text
-    )
+        # Insert packet details into the text box
+        result_text.insert(tk.END, f"Source: {src_ip}, Destination: {dst_ip}, Protocol: {protocol}\n")
+        result_text.yview(tk.END)  # Auto-scroll to latest entry
 
-def decrypt(ciphertext, key):
-    return ''.join(
-        letters[(letters.index(letter.lower()) - key) % 26] if letter.lower() in letters else letter for letter in ciphertext
-    )
+# Function to start packet sniffing
+def start_sniffing():
+    selected_name = interface_var.get()
+    interface = interface_dict.get(selected_name, None)
 
-def perform_action():
-    action = action_var.get()
-    text = text_entry.get("1.0", tk.END).strip()
-    key = key_entry.get().strip()
-
-    if not key.isdigit() or not (1 <= int(key) <= 26):
-        messagebox.showerror("Invalid Key", "Key must be an integer between 1 and 26.")
+    if not interface:
+        messagebox.showerror("Error", "Please select a valid network interface.")
         return
 
-    key = int(key)
-    result = encrypt(text, key) if action == "Encrypt" else decrypt(text, key)
+    try:
+        # Sniff asynchronously with store=0 to avoid memory issues
+        scapy.sniff(iface=interface, count=10, store=0, prn=lambda pkt: packet_info(pkt))
+    except Exception as e:
+        messagebox.showerror("Sniffing Error", str(e))
 
-    result_text.delete("1.0", tk.END)
-    result_text.insert(tk.END, result)
-
-# Create the main window
+# Create GUI
 root = tk.Tk()
-root.title("Caesar Cipher")
+root.title("Network Packet Sniffer")
+root.geometry("900x400")  # Landscape layout
 
-# Main frame
-main_frame = ttk.Frame(root, padding=20)
-main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+# Create frames
+main_frame = tk.Frame(root, padx=10, pady=10)
+main_frame.pack(fill="both", expand=True)
 
-# Action frame
-action_frame = ttk.Labelframe(main_frame, text="Action", padding=10)
-action_frame.grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+# Network Interface Selection
+ttk.Label(main_frame, text="Select Network Interface:", font=("Arial", 12)).grid(row=0, column=0, padx=10, pady=5, sticky="w")
+interface_var = tk.StringVar()
+interface_dict = {name: value for name, value in get_network_interfaces()}
+interface_dropdown = ttk.Combobox(main_frame, textvariable=interface_var, values=list(interface_dict.keys()), state="readonly")
+interface_dropdown.grid(row=0, column=1, padx=10, pady=5, sticky="w")
 
-action_var = tk.StringVar(value="Encrypt")
-encrypt_radio = ttk.Radiobutton(action_frame, text="Encrypt", variable=action_var, value="Encrypt")
-decrypt_radio = ttk.Radiobutton(action_frame, text="Decrypt", variable=action_var, value="Decrypt")
-encrypt_radio.grid(row=0, column=0, padx=10)
-decrypt_radio.grid(row=0, column=1, padx=10)
+# Start Button
+start_button = ttk.Button(main_frame, text="Start Sniffing", command=start_sniffing)
+start_button.grid(row=0, column=2, padx=10, pady=5, sticky="w")
 
-# Key frame
-key_frame = ttk.Frame(main_frame, padding=10)
-key_frame.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
+# Packet Display
+ttk.Label(main_frame, text="Captured Packets:", font=("Arial", 12)).grid(row=1, column=0, columnspan=3, padx=10, pady=5, sticky="w")
+result_text = tk.Text(main_frame, height=15, width=100, bg="black", fg="green")
+result_text.grid(row=2, column=0, columnspan=3, padx=10, pady=5)
 
-ttk.Label(key_frame, text="Key (1-26):").grid(row=0, column=0, padx=10)
-key_entry = ttk.Entry(key_frame, width=5)
-key_entry.grid(row=0, column=1, padx=10)
-
-# Text and result frames in landscape view
-text_result_frame = ttk.Frame(main_frame, padding=10)
-text_result_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky=(tk.W, tk.E))
-
-ttk.Label(text_result_frame, text="Enter text:").grid(row=0, column=0, padx=10)
-text_entry = tk.Text(text_result_frame, height=10, width=40)
-text_entry.grid(row=1, column=0, padx=10, pady=5)
-
-ttk.Label(text_result_frame, text="Result:").grid(row=0, column=1, padx=10)
-result_text = tk.Text(text_result_frame, height=10, width=40)
-result_text.grid(row=1, column=1, padx=10, pady=5)
-
-# Perform Action button
-action_button = ttk.Button(main_frame, text="Perform Action", command=perform_action)
-action_button.grid(row=2, column=0, columnspan=2, pady=10)
-
-# Start the main loop
+# Run GUI
 root.mainloop()
